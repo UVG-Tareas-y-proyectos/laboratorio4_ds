@@ -15,6 +15,9 @@ data/processed/amatitlan/*/*
 data/processed/series_temporales/*
 data/processed/resultados/
 data/processed/figuras/
+data/processed/dataset_ml.parquet
+data/processed/dataset_ml.csv
+reports/figures/
 
 # Conservar la estructura y sus notas.
 !data/**/.gitkeep

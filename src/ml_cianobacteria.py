@@ -82,6 +82,45 @@ def descargar_bandas(conexion, nombre_lago: str) -> None:
         print(nombre_lago, fecha, "bandas", trabajo.job_id)
 
 
+def descargar_nir(lagos: Iterable[str] = ("Atitlan", "Amatitlan")) -> None:
+    """Baja B08 y lo guarda como cubo aparte.
+
+    Los cubos de ``analisis_completo`` solo traen indices. B08 es la unica
+    banda del conjunto que no participa en la formula de Cya, asi que es la
+    unica reflectancia que puede usarse como predictora.
+    """
+
+    from pystac_client import Client
+    import planetary_computer as pc
+
+    from src.analisis_completo import (
+        STAC_URL, buscar_escena, crear_grilla, _leer_banda, _reflectancia,
+    )
+
+    catalogo = Client.open(STAC_URL, modifier=pc.sign_inplace)
+    for lago in lagos:
+        grilla = crear_grilla(lago)
+        capas, fechas = [], []
+        for fecha in LAGOS[lago]["fechas"]:
+            item = buscar_escena(catalogo, lago, fecha)
+            if item is None:
+                print(f"  sin escena para {lago} {fecha}")
+                continue
+            nir = _leer_banda(item.assets["B08"].href, grilla)
+            capas.append(
+                _reflectancia(nir, item.properties.get("s2:processing_baseline"))
+                .astype("float32")
+            )
+            fechas.append(fecha)
+            print(lago, fecha, "B08")
+        destino = (CARPETA_RESULTADOS or CARPETA_DATOS / "resultados")
+        destino.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            destino / f"cubo_nir_{lago.lower()}.npz",
+            fechas=np.array(fechas), b08=np.stack(capas),
+        )
+
+
 def _coordenadas(perfil: dict) -> tuple:
     """Devuelve las coordenadas del centro de cada pixel, aplanadas."""
 
@@ -156,6 +195,12 @@ def _tabla_desde_cubo(nombre_lago: str) -> Optional[pd.DataFrame]:
     ys = norte - (np.arange(alto) + 0.5) * RESOLUCION_METROS
     malla_x, malla_y = np.meshgrid(xs, ys)
 
+    archivo_nir = carpeta / f"cubo_nir_{nombre_lago.lower()}.npz"
+    nir = None
+    if archivo_nir.exists():
+        datos_nir = np.load(archivo_nir)
+        nir = dict(zip([str(f) for f in datos_nir["fechas"]], datos_nir["b08"]))
+
     partes = []
     for indice, fecha in enumerate(fechas):
         parte = pd.DataFrame(
@@ -170,6 +215,8 @@ def _tabla_desde_cubo(nombre_lago: str) -> Optional[pd.DataFrame]:
                 "valido": cubo["valido"][indice].ravel(),
             }
         )
+        if nir is not None and fecha in nir:
+            parte["B08"] = nir[fecha].ravel().astype("float64")
         partes.append(parte)
 
     tabla = pd.concat(partes, ignore_index=True)
