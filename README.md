@@ -91,3 +91,12 @@ Como `Cya = 115530.31 * ((B03 * B04) / B02) ** 2.38`, **B02, B03 y B04 quedan
 excluidas como predictoras**. NDVI y NDWI comparten B04 y B03 con esa fórmula:
 van en el dataset pero solo en el conjunto de predictoras "amplio", no en el
 "estricto".
+
+`src/modelos_cianobacteria.py` cubre el resto del laboratorio: Regresión
+Logística, Random Forest y XGBoost con ajuste de hiperparámetros, validación
+espacial por bloques de 1 km en EPSG:32615, generalización entre lagos, SHAP y
+mapas predictivos.
+
+```bash
+python -m src.modelos_cianobacteria   # autochequeo, no necesita datos
+```
