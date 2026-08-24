@@ -234,6 +234,21 @@ def generalizacion_entre_lagos(datos: pd.DataFrame, X: List[str], y: str = "alta
     return pd.DataFrame(resultados).T.round(3)
 
 
+def comparar_con_mismo_lago(generalizacion: pd.DataFrame, metricas_mismo_lago: pd.Series) -> pd.DataFrame:
+    """7: pone la generalizacion entre lagos junto a la linea base del ejercicio 5
+    (mismo modelo, train/test mezclando ambos lagos)."""
+
+    base = pd.DataFrame(
+        [metricas_mismo_lago[["f1", "recall", "roc_auc"]]],
+        index=["Mismo lago (entrenamiento y prueba mezclados)"],
+    )
+    comparacion = pd.concat([base, generalizacion[["f1", "recall", "roc_auc"]]])
+    comparacion["diferencia_f1_vs_mismo_lago"] = (
+        comparacion["f1"] - comparacion.loc[base.index[0], "f1"]
+    ).round(3)
+    return comparacion.round(3)
+
+
 def importancia_variables(modelo, X: List[str]) -> pd.DataFrame:
     """8.1: importancia global de las predictoras del mejor modelo."""
 
@@ -338,6 +353,49 @@ def analisis_errores(modelo, datos: pd.DataFrame, X: List[str], nombre_lago: str
     }
 
 
+def mapa_errores(modelo, datos: pd.DataFrame, X: List[str], nombre_lago: str, umbral: float = 0.5) -> Path:
+    """9: ubicacion espacial de aciertos, falsos positivos y falsos negativos,
+    agregando la probabilidad y la clase real promedio de todas las fechas."""
+
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+
+    sub = datos[datos["lago"] == nombre_lago].copy()
+    sub["probabilidad"] = modelo.predict_proba(sub[X])[:, 1]
+    promedio = sub.groupby(["x", "y"], as_index=False).agg(
+        probabilidad=("probabilidad", "mean"), real=("alta_presencia", "mean")
+    )
+    promedio["prediccion"] = (promedio["probabilidad"] >= umbral).astype(int)
+    promedio["real_bin"] = (promedio["real"] >= umbral).astype(int)
+
+    categorias = {"Verdadero negativo": 0, "Falso positivo": 1, "Falso negativo": 2, "Verdadero positivo": 3}
+    promedio["categoria"] = (
+        promedio["real_bin"] * 2 + promedio["prediccion"]
+    ).map({0: 0, 1: 1, 2: 2, 3: 3})
+
+    colores = ["#c9c9c9", "#e63946", "#1d3557", "#2a9d8f"]
+    fig, eje = plt.subplots(figsize=(6, 5), dpi=140)
+    eje.scatter(
+        promedio["x"], promedio["y"], c=promedio["categoria"],
+        cmap=ListedColormap(colores), s=5, vmin=0, vmax=3,
+    )
+    eje.legend(
+        handles=[Patch(color=c, label=n) for n, c in zip(categorias, colores)],
+        loc="upper right", fontsize=7,
+    )
+    eje.set_title(f"Errores espaciales — {nombre_lago}")
+    eje.set_xlabel("x (m)")
+    eje.set_ylabel("y (m)")
+    fig.tight_layout()
+    carpeta = CARPETA_FIGURAS / "ml"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    ruta = carpeta / f"mapa_errores_{nombre_lago.lower()}.png"
+    fig.savefig(ruta)
+    plt.close(fig)
+    return ruta
+
+
 def demo() -> None:
     """Chequeo minimo con datos sinteticos, no necesita el dataset real."""
 
@@ -387,11 +445,19 @@ def demo() -> None:
     generalizacion = generalizacion_entre_lagos(datos, X)
     assert len(generalizacion) == 2
 
+    comparacion_lago = comparar_con_mismo_lago(generalizacion, metricas.loc["Random Forest"])
+    assert len(comparacion_lago) == 3
+    assert "diferencia_f1_vs_mismo_lago" in comparacion_lago.columns
+
     importancia = importancia_variables(modelos["Random Forest"], X)
     assert set(importancia["variable"]) == set(X)
 
-    errores = analisis_errores(modelos["Random Forest"], datos.assign(alta_presencia=respuesta), X, "Atitlan")
+    datos_resp = datos.assign(alta_presencia=respuesta)
+    errores = analisis_errores(modelos["Random Forest"], datos_resp, X, "Atitlan")
     assert 0 <= errores["pct_aciertos"] <= 100
+
+    ruta_errores = mapa_errores(modelos["Random Forest"], datos_resp, X, "Atitlan")
+    assert ruta_errores.exists()
 
     print("demo ok")
 
